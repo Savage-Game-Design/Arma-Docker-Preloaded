@@ -1,0 +1,7 @@
+# Keeps the build context small and narrows the cache key of steps that mount it.
+# Steam credentials are passed with --secret, which reads them outside the build context.
+secrets
+.git
+.idea
+**/__pycache__
+**/*.pyc

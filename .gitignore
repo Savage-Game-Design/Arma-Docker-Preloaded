@@ -1,0 +1,8 @@
+# Jetbrains IDE files
+.idea
+
+# Compiled python
+**/*.pyc
+
+# Secrets 
+secrets
