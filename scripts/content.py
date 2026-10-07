@@ -41,3 +41,21 @@ class ManifestEntry:
 
 
 MANIFEST_FILENAME = "installed_content.json"
+
+
+def get_keys_folder(mod_root: Path) -> Path | None:
+    """The folder holding a mod's .bikey files, or None if the mod has none.
+
+    Installed mods are lower-cased, but CDLC folders and mods given by absolute path keep
+    their own casing, so both spellings are checked. Used by the installer for the manifest
+    and by the entrypoint to build -keysFolder for the mods a server loads.
+    """
+    for candidate in (mod_root / "keys", mod_root / "Keys"):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def list_key_files(mod_root: Path) -> list[Path]:
+    folder = get_keys_folder(mod_root)
+    return sorted(folder.glob("*.bikey")) if folder is not None else []

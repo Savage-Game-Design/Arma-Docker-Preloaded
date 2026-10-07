@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 import subprocess
 
+from scripts.content import get_keys_folder
 from server_config_generator.generate_server_config import generate_all, ConfigError, DEFAULT_DEFAULTS_FILE
 
 PROFILES_ROOT = Path.home() / ".local/share/Arma 3 - Other Profiles"
@@ -62,6 +63,52 @@ def get_arma_argument(arma_parameters: list, name: str) -> str | None:
         if param.lower().startswith(prefix):
             return param[len(prefix):]
     return None
+
+def get_arma_list_arguments(arma_parameters: list, name: str) -> list[str]:
+    """All values of a repeatable, semicolon-separated Arma argument such as -mod=a;b -mod=c."""
+    prefix = f"-{name}=".lower()
+    values = []
+    for param in arma_parameters:
+        if param.lower().startswith(prefix):
+            values.extend(v.strip() for v in param[len(prefix):].split(";") if v.strip())
+    return values
+
+def mod_keys_folders(arma_parameters: list, arma_root: Path) -> list[str]:
+    """The keys/ folder of every mod named in -mod= and -servermod=, as paths Arma can take."""
+    folders = []
+    for mod in get_arma_list_arguments(arma_parameters, "mod") + get_arma_list_arguments(arma_parameters, "servermod"):
+        mod_path = Path(mod) if Path(mod).is_absolute() else arma_root / mod
+        if not mod_path.is_dir():
+            print(f"Warning: mod '{mod}' not found at {mod_path}, no keys loaded for it", flush=True)
+            continue
+        keys_dir = get_keys_folder(mod_path)
+        if keys_dir is None:
+            print(f"Info: mod '{mod}' has no keys folder", flush=True)
+            continue
+        folder = keys_dir.as_posix() if Path(mod).is_absolute() else f"{mod.rstrip('/')}/{keys_dir.name}"
+        if folder not in folders:
+            folders.append(folder)
+    return folders
+
+def with_mod_keys(arma_parameters: list, arma_root: Path) -> list:
+    """Adds the loaded mods' keys folders to -keysFolder=, appending to one the caller passed.
+
+    Keys are not copied into the server's keys/ folder at build time, so only mods a server
+    actually loads have their signatures accepted. The base game keys folder stays included
+    unless the caller lists !keys themselves.
+    """
+    folders = mod_keys_folders(arma_parameters, arma_root)
+    if not folders:
+        return list(arma_parameters)
+    prefix = "-keysfolder="
+    for index, param in enumerate(arma_parameters):
+        if param.lower().startswith(prefix):
+            existing = [v for v in param[len(prefix):].split(";") if v]
+            merged = existing + [f for f in folders if f not in existing]
+            updated = list(arma_parameters)
+            updated[index] = "-keysFolder=" + ";".join(merged)
+            return updated
+    return [*arma_parameters, "-keysFolder=" + ";".join(folders)]
 
 def with_default_config(arma_parameters: list) -> list:
     """Adds -config= pointing at the generated server.cfg, unless the caller passed their own."""
@@ -134,7 +181,7 @@ def run(args):
     arma_root = Path(os.environ["ARMA_INSTALL_PATH"])
     arma_executable = arma_root / os.environ.get("ARMA_EXECUTABLE", "arma3server_x64")
 
-    arma_parameters = with_default_config(args.arma_parameters)
+    arma_parameters = with_mod_keys(with_default_config(args.arma_parameters), arma_root)
 
     check_critical_paths()
     generate_server_config(arma_root, arma_parameters)

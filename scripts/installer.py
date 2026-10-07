@@ -3,7 +3,7 @@
 A mod gets:
   - an "@<name>" folder under the server root, lower-cased throughout, which Arma on Linux needs
   - an "@<meta.cpp name>" symlink, when meta.cpp declares a name
-  - its *.bikey files copied into the server's keys/ folder
+  - its *.bikey files left in place; the entrypoint passes loaded mods' keys/ folders via -keysFolder
 A mission is placed in mpmissions/.
 
 Everything installed is recorded in installed_content.json, which the entrypoint prints at startup.
@@ -14,13 +14,8 @@ import os
 import shutil
 from pathlib import Path
 
-from content import MANIFEST_FILENAME, Content, Kind, ManifestEntry
+from content import MANIFEST_FILENAME, Content, Kind, ManifestEntry, list_key_files
 from errors import BuildError
-
-
-def key_conflict(mod_name: str, key_path: Path) -> BuildError:
-    return BuildError(f"Mod {mod_name} ships key '{key_path.name}', but a different key with that name "
-                      f"is already installed at '{key_path}' by another mod")
 
 
 def parse_meta(path) -> dict[str, str]:
@@ -127,7 +122,7 @@ class Installer:
         dest = self.arma_dir / content.name
 
         if dest.exists() or dest.is_symlink():
-            message  =  f"Cannot install mod {content.name} from {content.origin}. A {describe_existing(dest)} already exists at that location"
+            message = f"Cannot install mod {content.name} from {content.origin}: {describe_existing(dest)} already exists at that location"
             if not dest.is_dir():
                 raise BuildError(message + ".")
             if not content.overlay:
@@ -136,7 +131,7 @@ class Installer:
             if not dest.exists():
                 raise BuildError(message + " and is broken.")
             print(f"Overlaying {content.origin} onto existing mod {content.name}", flush=True)
-            real_dest = os.path.realpath(dest)
+            real_dest = Path(dest).resolve()
             merge_copy(content.path, real_dest)
         elif content.disposable:
             shutil.move(str(content.path), str(dest))
@@ -146,7 +141,7 @@ class Installer:
         # Do a renaming pass to prevent errors in Arma. Everything must be lower case.
         lowercase_all_files_at_path(dest)
         self.link_meta_name(dest, content)
-        keys = self.copy_keys(dest)
+        keys = self.list_keys(dest)
         print(f"Installed {content.name} from {content.origin}, load with -mod={content.name}", flush=True)
         return dest, keys
 
@@ -179,26 +174,16 @@ class Installer:
         link.symlink_to(mod_dir, target_is_directory=True)
         print(f"Linked {link.name} -> {mod_dir.name}, mod can also be loaded with -mod={link.name}", flush=True)
 
-    def copy_keys(self, mod_dir: Path) -> list[str]:
-        """Copies the mod's *.bikey files into keys/ and returns their names."""
-        keys_folder = mod_dir / "keys"
-        key_files = sorted(keys_folder.glob("*.bikey")) if keys_folder.is_dir() else []
+    def list_keys(self, mod_dir: Path) -> list[str]:
+        """Names of the mod's *.bikey files, for the manifest.
+
+        Keys are not copied anywhere at build time. At startup the entrypoint passes the keys/
+        folder of every mod named in -mod= and -servermod= to Arma via -keysFolder, so only the
+        mods a server actually loads have their signatures accepted.
+        """
+        key_files = list_key_files(mod_dir)
         if not key_files:
             print(f"Info: Mod {mod_dir.name} ships no .bikey files", flush=True)
-            return []
-
-        keys_dir = self.arma_dir / "keys"
-        keys_dir.mkdir(exist_ok=True)
-        for key_file in key_files:
-            dest = keys_dir / key_file.name
-            if dest.exists():
-                if dest.read_bytes() != key_file.read_bytes():
-                    raise key_conflict(mod_dir.name, dest)
-                print(f"Key {key_file.name} from {mod_dir.name} is already installed", flush=True)
-                continue
-            shutil.copy(key_file, dest)
-            print(f"Copied key {key_file.name} from {mod_dir.name}", flush=True)
-        # Every key the mod relies on, including identical ones another mod already installed.
         return [key_file.name for key_file in key_files]
 
     # ----------------------------------------------------------------------- missions

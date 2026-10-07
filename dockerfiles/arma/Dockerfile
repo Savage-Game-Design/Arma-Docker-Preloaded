@@ -53,7 +53,8 @@ WORKDIR /arma
 
 # Copy only essential files. Changes to these files will break the cache key and cause Arma
 # to be downloaded  again.
-COPY ../../scripts/install.py ../../scripts/cdlcs.py ../../scripts/errors.py \
+# content.py is here for run.py, which uses it at startup in both images.
+COPY ../../scripts/install.py ../../scripts/cdlcs.py ../../scripts/errors.py ../../scripts/content.py \
      ../../scripts/steam_downloader.py ../../scripts/steamdepotdownloader.py ../../scripts/steamcmd.py \
      ./scripts/
 

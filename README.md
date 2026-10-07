@@ -108,9 +108,10 @@ Mod folder names are lower-cased and stripped to `a-z0-9_@.-`. Installing the sa
 name twice will cause the build to fail. The exception is missions and mods from `ARMA_LOCAL`: these 
 are copied over any existing mod/mission of the same name, replacing existing files if needed.
 
-Every mod, whatever its source, has its `.bikey` files copied into the server's `keys/` folder,
-so only include mods you intend to use. Two mods shipping different keys with the same filename
-fail the build. Rebuild the image to use a different modset.
+Mod keys are loaded at startup from every mod named in `-mod=` and `-servermod=`. 
+Each mod's `keys` folder is passed to Arma with `-keysFolder`, so only the mods a server actually 
+loads have their signatures accepted. The `keys` folder from the server directory is always included. 
+If you pass your own `-keysFolder=`, the mod folders are appended to it, and `!keys` in your list still excludes the base folder.
 
 A workshop item is a mission when its download is a single file with no mod folders, whichever
 argument listed it. Steam records the upload under a mangled name ending in `.<map>.pbo`; DepotDownloader
