@@ -1,15 +1,17 @@
 import argparse
+import json
 import os
 import shutil
 from pathlib import Path
 import subprocess
 
-from scripts.secrets import expand_secrets
 from server_config_generator.generate_server_config import generate_all, ConfigError, DEFAULT_DEFAULTS_FILE
 
 PROFILES_ROOT = Path.home() / ".local/share/Arma 3 - Other Profiles"
 # Written into the Arma install directory, which is also the server's working directory.
 GENERATED_CONFIG_NAME = "server.cfg"
+# Written by scripts/install_content.py into the Arma install directory at build time.
+INSTALLED_CONTENT_MANIFEST = "installed_content.json"
 
 DOCKER_USER = "arma"
 DOCKER_GROUP = "arma"
@@ -107,9 +109,26 @@ def generate_server_config(arma_root: Path, arma_parameters: list):
     profile_path = PROFILES_ROOT / profile_name / f"{profile_name}.Arma3Profile"
     write_generated_file(profile_path, generated.profile, "ARMA_DIFFICULTY_*")
 
-def is_mod(path: Path) -> bool:
-    mod_file = path / "mod.cpp"
-    return mod_file.is_file() and mod_file.exists()
+def print_installed_content(arma_root: Path):
+    """Prints the manifest written by install_content.py at build time, if there is one."""
+    manifest_path = arma_root / INSTALLED_CONTENT_MANIFEST
+    if not manifest_path.exists():
+        print("No installed-content manifest found", flush=True)
+        return
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+        rows = [[str(entry.get(column, "")) for column in ("kind", "name", "origin", "load")] for entry in entries]
+    except (OSError, ValueError, TypeError, AttributeError) as e:
+        print(f"Couldn't read installed-content manifest '{manifest_path}': {e}", flush=True)
+        return
+    if not rows:
+        print("Installed content: none", flush=True)
+        return
+    headers = ["KIND", "NAME", "ORIGIN", "LOAD WITH"]
+    widths = [max(len(row[i]) for row in [headers, *rows]) for i in range(len(headers))]
+    lines = ["  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip() for row in [headers, *rows]]
+    print("Installed content:\n" + "\n".join(lines), flush=True)
 
 def run(args):
     arma_root = Path(os.environ["ARMA_INSTALL_PATH"])
@@ -120,8 +139,7 @@ def run(args):
     check_critical_paths()
     generate_server_config(arma_root, arma_parameters)
 
-    available_mods = [mod_path.name for mod_path in arma_root.iterdir() if is_mod(mod_path)]
-    print(f"Available mods: {available_mods}")
+    print_installed_content(arma_root)
 
     command = [
         arma_executable,
@@ -129,7 +147,7 @@ def run(args):
     ]
 
     print(f"Running Arma 3: {[str(param) for param in command]}", flush=True)
-    subprocess.run(expand_secrets(command), cwd=arma_root)
+    subprocess.run([str(param) for param in command], cwd=arma_root)
 
 
 parser = argparse.ArgumentParser(description="Runs Arma 3")

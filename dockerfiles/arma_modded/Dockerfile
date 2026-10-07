@@ -2,9 +2,26 @@
 ARG ARMA_IMAGE="savagegamedesign/arma"
 ARG ARMA_VERSION="latest"
 
+# Local content comes from a named build context called "local", which can point anywhere:
+#   docker build --build-context local=/path/to/content ...
+#   compose: build.additional_contexts: { local: ../content }
+# When no such context is given, this empty stage is used in its place.
+FROM scratch AS local
+
 FROM ${ARMA_IMAGE}:${ARMA_VERSION}
 
-# Semicolon separated list of steam workshop ids: 12345;678910;12345
+# Print installer output as it happens rather than in buffered chunks.
+ENV PYTHONUNBUFFERED=1
+
+# Each content step installs whatever its sources contain: both mods or missions. 
+# Separating ARMA_MISSIONS from ARMA_MODS allows missions to be updated without redownloading mods.
+
+# A record of everything installed is kept in installed_content.json and is printed on startup.
+
+# Semicolon separated list of Steam workshop ids and/or URLs to .zip or .pbo files:
+#   "450814997;https://example.com/mods.zip"
+ARG ARMA_MODS=""
+# Deprecated: use ARMA_MODS. Still honoured, its entries are merged into ARMA_MODS.
 ARG MODLIST=""
 
 WORKDIR /arma
@@ -14,12 +31,19 @@ COPY ../../scripts ./scripts/
 
 RUN --mount=type=secret,id=STEAM_USERNAME,env=STEAM_USERNAME \
     --mount=type=secret,id=STEAM_PASSWORD,env=STEAM_PASSWORD \
-    python3 ./scripts/install-mods.py "${MODLIST}"
+    python3 ./scripts/install_content.py --mods "${ARMA_MODS}" --legacy-modlist "${MODLIST}"
 
-# The build context root is mounted, rather than the folders themselves, so the build
-# succeeds when extra_mods/ or missions/ do not exist. The scripts skip a missing folder.
-RUN --mount=type=bind,target=/context \
-    python3 ./scripts/install-mods-from-folder.py /context/extra_mods
+# Semicolon separated list of Steam workshop ids, "<id>=<name>.<map>" overrides, and/or URLs to
+# .zip or .pbo files. 
+ARG ARMA_MISSIONS=""
 
-RUN --mount=type=bind,target=/context \
-    python3 ./scripts/install-missions-from-folder.py /context/missions
+RUN --mount=type=secret,id=STEAM_USERNAME,env=STEAM_USERNAME \
+    --mount=type=secret,id=STEAM_PASSWORD,env=STEAM_PASSWORD \
+    python3 ./scripts/install_content.py --missions "${ARMA_MISSIONS}"
+
+# Semicolon separated paths, relative to the "local" build context, to folders that are or contain mods/missions. 
+# Only the "local" context is mounted, so this step only re-runs when that content changes.
+ARG ARMA_LOCAL=""
+
+RUN --mount=type=bind,from=local,target=/local \
+    python3 ./scripts/install_content.py --local "${ARMA_LOCAL}" --local-root /local

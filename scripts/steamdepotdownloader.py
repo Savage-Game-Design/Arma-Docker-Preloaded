@@ -3,10 +3,6 @@ import shutil
 import subprocess
 from steam_downloader import *
 
-class SteamDepotDownloaderFailedError(Exception):
-    def __init__(self, reason=""):
-        super().__init__("Steam Depot Downloader execution failed" + f": {reason}" if reason else "")
-
 class SteamDepotDownloader(SteamDownloader):
     def __init__(self, credentials: SteamCredentials, temp_dir: Path):
         self.credentials = credentials
@@ -44,9 +40,9 @@ class SteamDepotDownloader(SteamDownloader):
                     '-depot',
                     depot
                 ]
-                self._execute_command(depot_command)
+                self._execute_command(depot_command, what=f"app {app.id} depot {depot}")
         else:
-            self._execute_command(command)
+            self._execute_command(command, what=f"app {app.id}")
 
         self._cleanup_install()
         move_contents(self.temp_dir, installable_app.install_dir)
@@ -61,14 +57,14 @@ class SteamDepotDownloader(SteamDownloader):
             "-pubfile", workshop_item.id
         ])
 
-        self._execute_command(command)
+        self._execute_command(command, what=f"workshop item {workshop_item.id}")
         self._cleanup_install()
         move_contents(self.temp_dir, installable_workshop_item.install_dir)
 
-    def _execute_command(self, command):
+    def _execute_command(self, command, what: str):
         result = subprocess.run(command, capture_output=False)
         if result.returncode != 0:
-            raise SteamDepotDownloaderFailedError()
+            raise BuildError(f"Steam Depot Downloader execution failed: downloading {what} exited with code {result.returncode}")
 
     def _prepare_temp_dir(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)

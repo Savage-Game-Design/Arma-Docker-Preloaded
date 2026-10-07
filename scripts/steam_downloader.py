@@ -1,8 +1,25 @@
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, Iterable, TypeVar, Generic
 
-from secrets import Secret, read_secret_from_env_var
+from errors import BuildError
+
+
+@dataclass
+class Secret:
+    """A value that must never appear in logs."""
+    value: str
+
+    def __str__(self):
+        return "!!SECRET!!"
+
+    def __repr__(self):
+        return "!!SECRET!!"
+
+
+def read_secret_from_env_var(name: str) -> Secret:
+    return Secret(os.environ[name].strip())
 
 
 @dataclass
@@ -50,7 +67,6 @@ def move_contents(src: Path, dest: Path):
     for path in src.iterdir():
         path.rename(dest / path.name)
 
-class MissingWorkshopItemError(Exception):
-    def __init__(self, path: str):
-        super().__init__(f"Downloaded workshop item not found at '{path}'")
+def missing_workshop_item(path) -> BuildError:
+    return BuildError(f"Downloaded workshop item not found at '{path}'")
 

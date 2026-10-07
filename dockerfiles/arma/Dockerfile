@@ -51,8 +51,11 @@ RUN mkdir /arma && chown -R arma:arma /arma
 
 WORKDIR /arma
 
-# Copy scripts one at a time, to minimise cache-breaks that mean we need to redownload Arma
-COPY ../../scripts ./scripts/
+# Copy only essential files. Changes to these files will break the cache key and cause Arma
+# to be downloaded  again.
+COPY ../../scripts/install.py ../../scripts/cdlcs.py ../../scripts/errors.py \
+     ../../scripts/steam_downloader.py ../../scripts/steamdepotdownloader.py ../../scripts/steamcmd.py \
+     ./scripts/
 
 USER arma
 

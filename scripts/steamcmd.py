@@ -4,14 +4,6 @@ import subprocess
 
 from steam_downloader import *
 
-class SteamcmdCredentialCacheNotFound(Exception):
-    def __init__(self, path: str):
-        super().__init__(f"Steamcmd credential cache not found at {path}")
-
-class SteamcmdFailedError(Exception):
-    def __init__(self, reason=""):
-        super().__init__("Steamcmd execution failed" + f": {reason}" if reason else "")
-
 class SteamCmd(SteamDownloader):
     def __init__(self, credentials: SteamCredentials, temp_dir: Path):
         self.credentials = credentials
@@ -71,14 +63,14 @@ class SteamCmd(SteamDownloader):
         result = subprocess.run(command, capture_output=False)
 
         if result.returncode != 0:
-            raise SteamcmdFailedError()
+            raise BuildError(f"Steamcmd execution failed: exited with code {result.returncode}")
 
     def move_workshop_items_to_destinations(self, installable_workshop_items: InstallableWorkshopItems):
         for installable_workshop_item in installable_workshop_items:
             workshop_item = installable_workshop_item.item
             download_path = self.temp_dir / "steamapps" / "workshop" / "content" / workshop_item.app_id / workshop_item.id
             if not download_path.exists():
-                raise MissingWorkshopItemError(str(download_path))
+                raise missing_workshop_item(download_path)
             move_contents(download_path, installable_workshop_item.install_dir)
 
     def cleanup_app_folder(self):
@@ -92,5 +84,7 @@ class SteamCmd(SteamDownloader):
     def clear_steam_cache():
         cache_dir = (Path.home() / "Steam").absolute()
         if not cache_dir.exists():
-            raise SteamcmdCredentialCacheNotFound(str(cache_dir))
+            # Steamcmd may have failed before creating it; let that failure surface instead.
+            print(f"Warning: Steam cache folder '{cache_dir}' not found, nothing to clear", flush=True)
+            return
         shutil.rmtree(cache_dir)

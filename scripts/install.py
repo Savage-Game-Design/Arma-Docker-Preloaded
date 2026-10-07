@@ -2,7 +2,8 @@ import argparse
 import os
 from pathlib import Path
 
-from cdlcs import CDLC, CDLCId, CDLCsById
+from cdlcs import CDLC, CDLCS
+from errors import BuildError
 from steam_downloader import App, Branch, Installable, WorkshopItem, get_steam_credentials_env
 from steamcmd import SteamCmd
 from steamdepotdownloader import SteamDepotDownloader
@@ -33,8 +34,11 @@ def install(args):
         name=branch_name,
     )
 
-    cdlcIds = [CDLCId(idStr) for idStr in args.cdlcs.split(",") if len(idStr)]
-    cdlcs = [CDLCsById[cdlcId.value] for cdlcId in cdlcIds]
+    cdlc_ids = [value.strip() for value in args.cdlcs.split(",") if value.strip()]
+    unknown = [value for value in cdlc_ids if value not in CDLCS]
+    if unknown:
+        raise BuildError(f"Unknown CDLC ids {unknown}. Known ids: {', '.join(CDLCS)}")
+    cdlcs = [CDLCS[value] for value in cdlc_ids]
     app = make_arma_server_app(branch, cdlcs)
 
     install_dir = Path(os.environ["ARMA_INSTALL_PATH"])
@@ -79,4 +83,8 @@ args = parser.parse_args()
 # Allows --cdlcs to be specified with no arguments, and still be stored as a string
 args.cdlcs = args.cdlcs or ""
 
-install(args)
+try:
+    install(args)
+except BuildError as e:
+    print(f"ERROR: {e}", flush=True)
+    raise SystemExit(1)

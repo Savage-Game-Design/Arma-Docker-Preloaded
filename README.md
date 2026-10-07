@@ -15,8 +15,10 @@ This is designed to make hosting Arma with Docker Compose or container managers 
 ## Requirements
 
 - Docker with BuildKit (build secrets are used for Steam credentials).
-- A Steam account. It must own Arma 3 to download Creator DLCs or workshop mods, and it
-  cannot answer Steam Guard prompts during a build.
+- A Steam account for the vanilla image and for any workshop id in `ARMA_MODS` or
+  `ARMA_MISSIONS`. The account needs to own Arma 3 to download Creator DLCs or workshop content,
+  and can't answer Steam Guard prompts during a build. Installing mods that only use URLs and
+  local folders doesn't require credentials, as long as the base Arma docker image exists.
 - Credentials in two files, each containing only the value:
 
   ```
@@ -53,25 +55,89 @@ The modded image builds on top of the vanilla one, avoiding unnecessary rebuilds
 docker build -f dockerfiles/arma_modded/Dockerfile -t my-org/arma-modded:latest \
   --secret id=STEAM_USERNAME,src=./secrets/steam_username \
   --secret id=STEAM_PASSWORD,src=./secrets/steam_password \
-  --build-arg "MODLIST=450814997;3083451905" .
+  --build-arg "ARMA_MODS=450814997;3083451905;https://example.com/my_mods.zip" \
+  --build-arg "ARMA_MISSIONS=1234567890;2345678901=coop_town.altis;https://example.com/coop.altis.pbo" .
 ```
 
-| Source | How to supply it | Where it's mounted | How to load it |
-|---|---|---|---|
-| Workshop mods | `--build-arg "MODLIST=<id>;<id>"` | `/arma/server/@<id>` | `-mod=@<id>` |
-| Local mods | One folder per mod in `extra_mods/` | `/arma/server/@<folder>`, lower-cased | `-mod=@<folder>` or `-servermod=@<folder>` |
-| Missions | `.pbo` files in `missions/` | `/arma/server/mpmissions/`, lower-cased | In-game or via `ARMA_CFG_MISSION_1_TEMPLATE` |
+`ARMA_MODS` and `ARMA_MISSIONS` each take a semicolon-separated mix of Steam workshop ids and
+`https://` URLs to `.zip` or `.pbo` files. Ensure the value is quoted as the the shell treats 
+`;` as a command separator.
 
-Workshop mod keys are copied into the server's `keys/` folder automatically - so only include mods you intend to use. 
-Rebuild the image to use a different modset, rather than just unmounting them.
+Both `ARMA_MODS` and `ARMA_MISSIONS` can contain either missions or mods. It's recommended
+anything large go in `ARMA_MODS`, so that they aren't redownloaded when `ARMA_MISSIONS` changes.
 
-The `extra_mods/` and `missions/` folders are optional - create them only when you have missions to mount.
+`ARMA_LOCAL` lists paths to install from the `local` build context folder, for example missions
+or mods you already have copies of on the build machine. `ARMA_LOCAL` is run last, and changes 
+to it do not trigged a new download of `ARMA_MODS` or `ARMA_MISSIONS`.
+
+| Source | What it installs | How to load it |
+|---|---|---|
+| Workshop id | A mod as `@<id>`, plus an `@<name>` symlink named exactly as in its `meta.cpp`, case included. An item that is a single loose `.pbo` is a mission instead, see below | `-mod=@<id>` or `-mod=@<name>` |
+| URL to a `.zip` | Every mod and mission inside, read by the rules below | `-mod=@<folder>`, `ARMA_CFG_MISSION_1_TEMPLATE=<name>.<map>` |
+| URL to a `.pbo` | One mission, named after the file in the URL | `ARMA_CFG_MISSION_1_TEMPLATE=<name>.<map>` |
+| Path in `ARMA_LOCAL` | A mod folder, a `.pbo` mission, or a folder holding either, read by the rules below | as for a zip |
+
+Mods land in `/arma/server/@<folder>` and missions in `/arma/server/mpmissions/`, all lower-cased.
+`ARMA_LOCAL` paths are relative to a content folder passed as a named build context called
+`local`, which can be anywhere on the machine and need not be inside this repository:
+
+```bash
+docker build -f dockerfiles/arma_modded/Dockerfile -t my-org/arma-modded:latest \
+  --build-context local=/srv/arma-content \
+  --build-arg "ARMA_LOCAL=@my_mod;missions/coop.altis.pbo;packs" .
+```
+
+In Compose, set `build.additional_contexts: { local: /srv/arma-content }` (Compose 2.17 or
+later). An empty folder is used if the build context isn't provided, so all `ARMA_LOCAL` entries will fail. 
+
+A zip, or a folder listed in `ARMA_LOCAL`, is read as follows. The build log prints each item's `-mod=` name or mission template.
+- A lone folder that is not itself a mod, such as `my-pack/` holding `@cba/` and `@ace/`, will
+  be searched for mods. The mods must all be in the same folder.
+- A zip that is itself a single mod (`addons/`, `mod.cpp` or `meta.cpp` at its root) is named
+  after the zip file in the URL: `https://example.com/my_mod.zip` becomes `@my_mod`.
+- Otherwise every top-level folder with `addons/`, `mod.cpp` or `meta.cpp` is one mod, named after
+  the folder: a GitHub download holding `repo-main/addons/` becomes `@repo-main`.
+- An `@` folder holding mod folders, such as `@Mods/@cba/` and `@Mods/@ace/`, is a wrapper: each
+  child is a mod.
+- Mods are never nested: a mod folder inside a mod is just part of the outer mod.
+- `.pbo` files inside a mod stay in the mod. Any other `.pbo`, at the top or in a non-mod folder at
+  any depth, is treated as a mission.
+- Anything else is ignored, and builds fail if nothing is found in an `ARMA_LOCAL` entry.
+
+Mod folder names are lower-cased and stripped to `a-z0-9_@.-`. Installing the same mod or mission
+name twice will cause the build to fail. The exception is missions and mods from `ARMA_LOCAL`: these 
+are copied over any existing mod/mission of the same name, replacing existing files if needed.
+
+Every mod, whatever its source, has its `.bikey` files copied into the server's `keys/` folder,
+so only include mods you intend to use. Two mods shipping different keys with the same filename
+fail the build. Rebuild the image to use a different modset.
+
+A workshop item is a mission when its download is a single file with no mod folders, whichever
+argument listed it. Steam records the upload under a mangled name ending in `.<map>.pbo`; DepotDownloader
+keeps that name and steamcmd saves it as `<id>_legacy.bin`, so the map is taken from the local name or,
+failing that, from Steam's record. The build then names the mission from the item's workshop title: lower-cased, accents removed, spaces to `_`, everything else
+outside `a-z0-9_` removed. "My Great Mission! (v2)" on Stratis becomes
+`my_great_mission_v2.stratis.pbo`, and "Opération Café" becomes `operation_cafe`. To pick the
+name yourself, write the entry as `<id>=<name>.<map>` in `ARMA_MISSIONS`; no Steam lookup happens in that case. The
+build fails if the title lookup fails, or if the map cannot be determined and no override is given.
+
+Everything installed is recorded in `/arma/server/installed_content.json` (kind, name, origin,
+keys and load hint), and the server prints it as a table at startup.
 
 | Build arg | Purpose |
 |---|---|
 | `ARMA_IMAGE` | Base image name. Default `savagegamedesign/arma`. |
 | `ARMA_VERSION` | Base image tag. Default `latest`. |
-| `MODLIST` | Semicolon-separated workshop ids. Quote it on the command line, since the shell treats `;` as a command separator. Optional. |
+| `ARMA_MODS` | Semicolon-separated workshop ids and `.zip`/`.pbo` URLs, installed in the mods layer. Optional. |
+| `ARMA_MISSIONS` | Semicolon-separated workshop ids, `<id>=<name>.<map>` overrides, and `.zip`/`.pbo` URLs, installed in the missions layer. Optional. |
+| `ARMA_LOCAL` | Semicolon-separated paths in the `local` build context to mod folders, `.pbo` missions, or folders of either, installed last. Optional. |
+| `MODLIST` | Deprecated alias for `ARMA_MODS`, still honoured. |
+
+Each URL may download at most `ARMA_MAX_DOWNLOAD_BYTES` (default 20 GiB). A download that falls
+below `ARMA_MINIMUM_DOWNLOAD_SPEED` MB/s (default 10) averaged over that cap, or that waits more than
+`ARMA_DOWNLOAD_TIMEOUT_SECONDS` (default 60) for the connection or for any single read, fails. Each zip
+may extract to at most `ARMA_MAX_EXTRACT_BYTES` (default 25 GiB). To change a limit, add an `ENV` line
+to the modded Dockerfile before the install steps.
 
 ## Run a server
 
@@ -159,7 +225,7 @@ ARMA_CFG_HOSTNAME="Test" python3 server_config_generator/generate_server_config.
 | Path | Contents |
 |---|---|
 | `dockerfiles/arma/` | Vanilla image: Arma 3 server plus Creator DLCs. |
-| `dockerfiles/arma_modded/` | Adds workshop mods, local mods and missions to a vanilla image. |
-| `scripts/` | Build-time installers. Changing them invalidates the Arma download layer. |
+| `dockerfiles/arma_modded/` | Adds mods and missions from the workshop, URLs and local paths to a vanilla image. |
+| `scripts/` | Build-time installers. The vanilla image copies only the Arma install files, so editing the content installers never re-downloads Arma. |
 | `entrypoint/run.py` | Container entrypoint: generates config, then launches the server. Safe to modify without invalidating the cached Arma layer. |
 | `server_config_generator/` | Config generator and defaults files. Safe to modify without invalidating the cached Arma layer. |
