@@ -5,3 +5,15 @@ secrets
 .idea
 **/__pycache__
 **/*.pyc
+
+# Nothing in the build needs these. entrypoint/, server_config_generator/ and scripts/ are copied
+# by dockerfiles/arma; local content comes from a separate named build context.
+migration
+*.md
+build_arma_image.sh
+docker-compose*.yaml
+profiles
+atf
+# No longer read; local content comes from the "local" build context and ARMA_LOCAL
+extra_mods
+missions
