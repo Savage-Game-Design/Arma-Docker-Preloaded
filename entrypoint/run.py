@@ -165,7 +165,8 @@ def print_installed_content(arma_root: Path):
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
             entries = json.load(f)
-        rows = [[str(entry.get(column, "")) for column in ("kind", "name", "origin", "load")] for entry in entries]
+        rows = [[str(entry.get("kind", "")), str(entry.get("title") or entry.get("name", "")),
+                 str(entry.get("origin", "")), str(entry.get("load", ""))] for entry in entries]
     except (OSError, ValueError, TypeError, AttributeError) as e:
         print(f"Couldn't read installed-content manifest '{manifest_path}': {e}", flush=True)
         return

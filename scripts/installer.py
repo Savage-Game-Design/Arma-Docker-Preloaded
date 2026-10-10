@@ -2,7 +2,7 @@
 
 A mod gets:
   - an "@<name>" folder under the server root, lower-cased throughout, which Arma on Linux needs
-  - an "@<meta.cpp name>" symlink, when meta.cpp declares a name
+  - an "@<meta.cpp name>" symlink, when meta.cpp declares a name, sanitised like folder names
   - its *.bikey files left in place; the entrypoint passes loaded mods' keys/ folders via -keysFolder
 A mission is placed in mpmissions/.
 
@@ -16,6 +16,7 @@ from pathlib import Path
 
 from content import MANIFEST_FILENAME, Content, Kind, ManifestEntry, list_key_files
 from errors import BuildError
+from scanner import sanitise_mod_name
 
 
 def parse_meta(path) -> dict[str, str]:
@@ -45,6 +46,14 @@ def parse_meta(path) -> dict[str, str]:
             result[key] = value
 
     return result
+
+
+def read_meta_name(mod_dir: Path) -> str | None:
+    """The mod's name from its meta.cpp, or None if it has no meta.cpp or no name in it."""
+    meta_path = mod_dir / "meta.cpp"
+    if not meta_path.exists():
+        return None
+    return parse_meta(meta_path).get("name", "").strip() or None
 
 
 def lowercase_all_files_at_path(path: Path):
@@ -106,19 +115,19 @@ class Installer:
                                 f"as the one from {earlier.origin}")
 
         if content.kind is Kind.MOD:
-            dest, keys = self.install_mod(content)
+            dest, keys, title = self.install_mod(content)
         else:
-            dest, keys = self.install_mission(content)
+            dest, keys, title = self.install_mission(content)
 
         self.installed[key] = content
-        self.entries.append(ManifestEntry(kind=content.kind.value, name=content.name, origin=content.origin,
-                                          path=dest.relative_to(self.arma_dir).as_posix(),
+        self.entries.append(ManifestEntry(kind=content.kind.value, name=content.name, title=title or content.name,
+                                          origin=content.origin, path=dest.relative_to(self.arma_dir).as_posix(),
                                           load=content.load_hint, keys=keys))
         return dest
 
     # ----------------------------------------------------------------------- mods
 
-    def install_mod(self, content: Content) -> tuple[Path, list[str]]:
+    def install_mod(self, content: Content) -> tuple[Path, list[str], str | None]:
         dest = self.arma_dir / content.name
 
         if dest.exists() or dest.is_symlink():
@@ -140,24 +149,22 @@ class Installer:
 
         # Do a renaming pass to prevent errors in Arma. Everything must be lower case.
         lowercase_all_files_at_path(dest)
-        self.link_meta_name(dest, content)
+        meta_name = read_meta_name(dest)
+        if meta_name:
+            self.link_meta_name(dest, meta_name, content)
         keys = self.list_keys(dest)
         print(f"Installed {content.name} from {content.origin}, load with -mod={content.name}", flush=True)
-        return dest, keys
+        return dest, keys, meta_name
 
-    def link_meta_name(self, mod_dir: Path, content: Content):
-        meta_path = mod_dir / "meta.cpp"
-        if not meta_path.exists():
-            return
-        name = parse_meta(meta_path).get("name")
-        if not name:
-            return
-        if "/" in name or "\\" in name:
-            print(f"Warning: skipping name symlink for {mod_dir.name}: meta.cpp name '{name}' contains a path separator",
+    def link_meta_name(self, mod_dir: Path, name: str, content: Content):
+        # Same rules as folder names: lower-cased, whitespace to underscores, unsafe characters dropped.
+        link_name = sanitise_mod_name(name)
+        if link_name == "@":
+            print(f"Warning: skipping name symlink for {mod_dir.name}: meta.cpp name '{name}' has no usable characters",
                   flush=True)
             return
 
-        link = self.arma_dir / f"@{name}"
+        link = self.arma_dir / link_name
         if link.is_symlink() or link.exists():
             try:
                 if link.resolve() == mod_dir.resolve():
@@ -188,7 +195,7 @@ class Installer:
 
     # ----------------------------------------------------------------------- missions
 
-    def install_mission(self, content: Content) -> tuple[Path, list[str]]:
+    def install_mission(self, content: Content) -> tuple[Path, list[str], str | None]:
         mission_folder = self.arma_dir / "mpmissions"
         mission_folder.mkdir(exist_ok=True, parents=True)
         dest = mission_folder / content.name
@@ -205,7 +212,7 @@ class Installer:
             shutil.copy2(content.path, dest)
         print(f"Installed mission {content.name} from {content.origin}, "
               f"load with ARMA_CFG_MISSION_N_TEMPLATE={content.name[:-len('.pbo')]}", flush=True)
-        return dest, []
+        return dest, [], None
 
     # ----------------------------------------------------------------------- manifest
 

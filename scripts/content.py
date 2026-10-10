@@ -34,6 +34,7 @@ class Content:
 class ManifestEntry:
     kind: str
     name: str
+    title: str         # meta.cpp name for a mod that has one, otherwise the same as name
     origin: str
     path: str
     load: str

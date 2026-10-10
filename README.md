@@ -72,7 +72,7 @@ to it do not trigged a new download of `ARMA_MODS` or `ARMA_MISSIONS`.
 
 | Source | What it installs | How to load it |
 |---|---|---|
-| Workshop id | A mod as `@<id>`, plus an `@<name>` symlink named exactly as in its `meta.cpp`, case included. An item that is a single loose `.pbo` is a mission instead, see below | `-mod=@<id>` or `-mod=@<name>` |
+| Workshop id | A mod as `@<id>`, plus an `@<name>` symlink named after the `name` in its `meta.cpp`, lower-cased with spaces replaced by underscores (`CBA_A3 Beta` becomes `@cba_a3_beta`). An item that is a single loose `.pbo` is a mission instead, see below | `-mod=@<id>` or `-mod=@<name>` |
 | URL to a `.zip` | Every mod and mission inside, read by the rules below | `-mod=@<folder>`, `ARMA_CFG_MISSION_1_TEMPLATE=<name>.<map>` |
 | URL to a `.pbo` | One mission, named after the file in the URL | `ARMA_CFG_MISSION_1_TEMPLATE=<name>.<map>` |
 | Path in `ARMA_LOCAL` | A mod folder, a `.pbo` mission, or a folder holding either, read by the rules below | as for a zip |
@@ -122,8 +122,9 @@ outside `a-z0-9_` removed. "My Great Mission! (v2)" on Stratis becomes
 name yourself, write the entry as `<id>=<name>.<map>` in `ARMA_MISSIONS`; no Steam lookup happens in that case. The
 build fails if the title lookup fails, or if the map cannot be determined and no override is given.
 
-Everything installed is recorded in `/arma/server/installed_content.json` (kind, name, origin,
-keys and load hint), and the server prints it as a table at startup.
+Everything installed is recorded in `/arma/server/installed_content.json` (kind, name, title, origin,
+keys and load hint), and the server prints it as a table at startup. The table's NAME column shows a mod's
+`meta.cpp` name where it has one, and its folder name otherwise.
 
 | Build arg | Purpose |
 |---|---|
