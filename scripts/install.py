@@ -55,16 +55,10 @@ def install(args):
         if line:
             print(line, flush=True)
 
-    steam = SteamDepotDownloader(
-        credentials=get_steam_credentials_env(),
-        temp_dir=install_dir / "steamdepotdownloader_temp",
-    )
-
-    if args.steamcmd:
-        steam = SteamCmd(
-            credentials=get_steam_credentials_env(),
-            temp_dir=install_dir / "steamcmd_temp"
-        )
+    # The server is downloaded straight into install_dir; the cache folder is only for workshop
+    # items, which this script does not install.
+    downloader = SteamCmd if args.steamcmd else SteamDepotDownloader
+    steam = downloader(credentials=get_steam_credentials_env(), cache_dir=install_dir / ".workshop_cache")
 
     steam.install(Installable(app, install_dir), [])
 

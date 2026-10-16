@@ -62,11 +62,6 @@ def get_steam_credentials_env() -> SteamCredentials:
         password=read_secret_from_env_var("STEAM_PASSWORD"),
     )
 
-def move_contents(src: Path, dest: Path):
-    dest.mkdir(exist_ok=True, parents=True)
-    for path in src.iterdir():
-        path.rename(dest / path.name)
-
 def missing_workshop_item(path) -> BuildError:
     return BuildError(f"Downloaded workshop item not found at '{path}'")
 

@@ -29,8 +29,11 @@ USER arma
 # Refresh scripts folder - allows us to update scripts without an Arma reinstall
 COPY ../../scripts ./scripts/
 
+# The cache mount keeps every workshop download between builds, ensuring unchanged mods
+# aren't re-downloaded. UID/GID need to match "arma" user.
 RUN --mount=type=secret,id=STEAM_USERNAME,env=STEAM_USERNAME \
     --mount=type=secret,id=STEAM_PASSWORD,env=STEAM_PASSWORD \
+    --mount=type=cache,target=/arma/server/.workshop_cache,uid=1964,gid=1964,sharing=locked \
     python3 ./scripts/install_content.py --mods "${ARMA_MODS}" --legacy-modlist "${MODLIST}"
 
 # Semicolon separated list of Steam workshop ids, "<id>=<name>.<map>" overrides, and/or URLs to
@@ -39,6 +42,7 @@ ARG ARMA_MISSIONS=""
 
 RUN --mount=type=secret,id=STEAM_USERNAME,env=STEAM_USERNAME \
     --mount=type=secret,id=STEAM_PASSWORD,env=STEAM_PASSWORD \
+    --mount=type=cache,target=/arma/server/.workshop_cache,uid=1964,gid=1964,sharing=locked \
     python3 ./scripts/install_content.py --missions "${ARMA_MISSIONS}"
 
 # Semicolon separated paths, relative to the "local" build context, to folders that are or contain mods/missions. 

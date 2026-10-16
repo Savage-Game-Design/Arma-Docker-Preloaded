@@ -3,10 +3,20 @@ import shutil
 import subprocess
 from steam_downloader import *
 
+# DepotDownloader keeps its manifest state here. It lets a second run verify the existing files and fetch only changed chunks.
+# Needs to be on a cache volume across builds to avoid full re-downloads.
+STATE_FOLDER = ".DepotDownloader"
+
+
 class SteamDepotDownloader(SteamDownloader):
-    def __init__(self, credentials: SteamCredentials, temp_dir: Path):
+    def __init__(self, credentials: SteamCredentials, cache_dir: Path):
+        """
+        cache_dir: workshop items are downloaded into "<cache_dir>/<app_id>/<item_id>" and copied to
+                   their install location. This enables it to be cached across builds.
+                   Apps are downloaded straight into their install location and do not use it.
+        """
         self.credentials = credentials
-        self.temp_dir = temp_dir
+        self.cache_dir = cache_dir
 
     def install(self, installable_app: Installable[App] | None, installable_workshop_items: InstallableWorkshopItems):
         if installable_app:
@@ -15,9 +25,10 @@ class SteamDepotDownloader(SteamDownloader):
             self.install_workshop_item(item)
 
     def install_app(self, installable_app: Installable[App]):
-        self._prepare_temp_dir()
         app = installable_app.item
-        command = self._get_base_steam_depot_downloader_command()
+        install_dir = installable_app.install_dir
+        install_dir.mkdir(exist_ok=True, parents=True)
+        command = self._get_base_steam_depot_downloader_command(install_dir)
         command.extend([
             "-app", installable_app.item.id
         ])
@@ -44,41 +55,38 @@ class SteamDepotDownloader(SteamDownloader):
         else:
             self._execute_command(command, what=f"app {app.id}")
 
-        self._cleanup_install()
-        move_contents(self.temp_dir, installable_app.install_dir)
-
+        # Nothing caches the app, so its state would only add to the image.
+        shutil.rmtree(install_dir / STATE_FOLDER, ignore_errors=True)
 
     def install_workshop_item(self, installable_workshop_item: Installable[WorkshopItem]):
-        self._prepare_temp_dir()
         workshop_item = installable_workshop_item.item
-        command = self._get_base_steam_depot_downloader_command()
+        download_dir = self.cache_dir / workshop_item.app_id / workshop_item.id
+        download_dir.mkdir(exist_ok=True, parents=True)
+        if (download_dir / STATE_FOLDER).is_dir():
+            print(f"Workshop item {workshop_item.id}: found in the download cache", flush=True)
+
+        command = self._get_base_steam_depot_downloader_command(download_dir)
         command.extend([
             "-app", workshop_item.app_id,
             "-pubfile", workshop_item.id
         ])
-
         self._execute_command(command, what=f"workshop item {workshop_item.id}")
-        self._cleanup_install()
-        move_contents(self.temp_dir, installable_workshop_item.install_dir)
+
+        # Copied rather than moved so the cache keeps it across builds.
+        shutil.copytree(download_dir, installable_workshop_item.install_dir, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(STATE_FOLDER))
 
     def _execute_command(self, command, what: str):
         result = subprocess.run(command, capture_output=False)
         if result.returncode != 0:
             raise BuildError(f"Steam Depot Downloader execution failed: downloading {what} exited with code {result.returncode}")
 
-    def _prepare_temp_dir(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-        self.temp_dir.mkdir(exist_ok=True, parents=True)
-
-    def _cleanup_install(self):
-        shutil.rmtree(self.temp_dir / ".DepotDownloader", ignore_errors=True)
-
-    def _get_base_steam_depot_downloader_command(self):
+    def _get_base_steam_depot_downloader_command(self, download_dir: Path):
         return [
             os.environ.get("STEAMDEPOTDOWNLOADER_PATH", "DepotDownloader"),
             "-max-downloads", "16",
             "-dir",
-            str(self.temp_dir.absolute()),
+            str(download_dir.absolute()),
             "-username",
             self.credentials.username.value,
             "-password",

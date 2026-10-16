@@ -20,6 +20,10 @@ from steamcmd import SteamCmd
 from steamdepotdownloader import SteamDepotDownloader
 
 STAGING_FOLDER = ".staging"
+# Workshop downloads land here, one folder per item, and the Dockerfile mounts a BuildKit cache at
+# this path so a later build only fetches what changed. Without such a mount it is just a temp
+# folder and is removed, so nothing large ends up in an image layer.
+WORKSHOP_CACHE_FOLDER = ".workshop_cache"
 
 # Failures that are the build's inputs or environment rather than a bug: reported in one line.
 EXPECTED_ERRORS = (BuildError,)
@@ -55,8 +59,8 @@ def make_downloader(arma_dir: Path, use_steamcmd: bool):
         raise BuildError("Workshop ids were given but STEAM_USERNAME and STEAM_PASSWORD are not set. "
                          "Pass them as build secrets, or use only URL sources.") from e
     if use_steamcmd:
-        return SteamCmd(credentials=credentials, temp_dir=arma_dir / "steamcmd_mods_temp")
-    return SteamDepotDownloader(credentials=credentials, temp_dir=arma_dir / "steamdepotdownloader_mods_temp")
+        return SteamCmd(credentials=credentials, cache_dir=arma_dir / WORKSHOP_CACHE_FOLDER)
+    return SteamDepotDownloader(credentials=credentials, cache_dir=arma_dir / WORKSHOP_CACHE_FOLDER)
 
 
 def run(args):
@@ -97,8 +101,18 @@ def run(args):
     finally:
         shutil.rmtree(staging, ignore_errors=True)
         if steam is not None:
-            # Removed so nothing empty is left in the image layer.
-            shutil.rmtree(steam.temp_dir, ignore_errors=True)
+            clean_workshop_cache(arma_dir / WORKSHOP_CACHE_FOLDER)
+
+
+def clean_workshop_cache(cache_dir: Path):
+    """Keeps the cache only when it is a mount (a BuildKit cache mount) and so outlives this layer."""
+    if not cache_dir.exists():
+        return
+    if os.path.ismount(cache_dir):
+        print(f"Keeping workshop download cache at {cache_dir} for the next build", flush=True)
+        return
+    print(f"{cache_dir} is not a cache mount, removing it so it does not bloat the image", flush=True)
+    shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def main():
